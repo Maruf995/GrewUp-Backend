@@ -1,62 +1,168 @@
-from rest_framework import viewsets, status
+from rest_framework import viewsets, permissions, status, filters
 from rest_framework.decorators import action
 from rest_framework.response import Response
-from .models import *
-from .serializers import *
+from django.contrib.auth.models import User
+from rest_framework.decorators import api_view, permission_classes
+from rest_framework.permissions import AllowAny
 
-class CrewUpViewSet(viewsets.ViewSet):
+from .models import (
+    Profile, Post, PostComment,
+    EducationTheme, StudentQuestion, StudentAnswer,
+    ChatRoom, ChatMessage, Event
+)
+from .serializers import (
+    ProfileSerializer, PostSerializer, PostCommentSerializer,
+    EducationThemeSerializer, StudentQuestionSerializer, StudentAnswerSerializer,
+    ChatRoomSerializer, ChatMessageSerializer, EventSerializer
+)
 
-    @action(detail=False, methods=['post'])
-    def register(self, request):
-        data = request.data
-        # Создаем пользователя или берем существующего для демо
-        user, _ = User.objects.get_or_create(username=data['nickname'])
-        profile, created = Profile.objects.get_or_create(
-            user=user,
-            nickname=data['nickname'],
-            region=data['region'],
-            avatar_url=data['avatar_url'],
-            interests=data.get('interests', []),
-            xp=50
-        )
-        return Response(ProfileSerializer(profile).data)
+class ProfileViewSet(viewsets.ModelViewSet):
+    queryset = Profile.objects.all()
+    serializer_class = ProfileSerializer
+    permission_classes = [permissions.AllowAny]
+    
+    # Включаем возможность сортировки (для Топ-3: /api/profiles/?ordering=-xp)
+    filter_backends = [filters.OrderingFilter]
+    ordering_fields = ['xp', 'level']
 
-    @action(detail=False, methods=['post'])
-    def do_action(self, request):
-        # Начисление XP согласно ТЗ (п. 3.2 и 3.6)
-        nickname = request.data.get('nickname')
-        act = request.data.get('action') # 'post', 'poll', 'chat', 'quiz'
-        profile = Profile.objects.get(nickname=nickname)
-
-        rewards = {'post': 30, 'poll': 5, 'quiz': 10, 'chat': 10}
-        xp_gain = rewards.get(act, 0)
-        
-        old_level = profile.level
-        profile.add_xp(xp_gain)
-        
+    @action(detail=True, methods=['post'])
+    def add_xp(self, request, pk=None):
+        """Начислить XP (симуляция активности)"""
+        profile = self.get_object()
+        try:
+            amount = int(request.data.get('amount', 10))
+        except ValueError:
+            return Response({"error": "Amount must be a number"}, status=status.HTTP_400_BAD_REQUEST)
+            
+        profile.add_xp(amount)
         return Response({
-            "xp_added": xp_gain,
-            "current_xp": profile.xp,
-            "level": profile.level,
-            "level_up": profile.level > old_level
+            'status': 'XP added', 
+            'new_xp': profile.xp, 
+            'new_level': profile.level
         })
 
-    @action(detail=False, methods=['get'])
-    def get_chats(self, request):
-        nickname = request.query_params.get('nickname')
-        profile = Profile.objects.get(nickname=nickname)
+    @action(detail=True, methods=['post'])
+    def reset_demo(self, request, pk=None):
+        """Сброс прогресса пользователя (для повторной презентации)"""
+        profile = self.get_object()
+        # 1. Сбрасываем уровень и XP до дефолтных
+        profile.xp = 50
+        profile.level = 1
+        profile.save()
         
-        chats = [{"name": "Анонимный чат", "type": "anon"}]
-        # Логика землячеств по ТЗ (п. 3.5.3)
-        if profile.region != "Бишкек":
-            chats.append({"name": f"Земляки ({profile.region})", "type": "regional"})
+        # 2. Здесь можно добавить очистку постов пользователя, если нужно
         
-        return Response(chats)
+        return Response({
+            'status': 'Demo Reset Successful', 
+            'xp': profile.xp, 
+            'level': profile.level
+        })
 
-    @action(detail=False, methods=['post'])
-    def reset_demo(self, request):
-        # Кнопка сброса для админки (п. 3.8)
-        nickname = request.data.get('nickname')
-        Profile.objects.filter(nickname=nickname).update(xp=50, level=1)
-        Post.objects.filter(author_name=nickname, content_type='feed').delete()
-        return Response({"status": "Сброшено"})
+
+class PostViewSet(viewsets.ModelViewSet):
+    queryset = Post.objects.all().order_by('-created_at')
+    serializer_class = PostSerializer
+    permission_classes = [permissions.AllowAny]
+    
+    def get_queryset(self):
+        queryset = super().get_queryset()
+        content_type = self.request.query_params.get('type')
+        if content_type:
+            queryset = queryset.filter(content_type=content_type)
+        return queryset
+
+
+class PostCommentViewSet(viewsets.ModelViewSet):
+    queryset = PostComment.objects.all()
+    serializer_class = PostCommentSerializer
+    permission_classes = [permissions.AllowAny]
+
+
+class EducationThemeViewSet(viewsets.ModelViewSet):
+    queryset = EducationTheme.objects.all()
+    serializer_class = EducationThemeSerializer
+    permission_classes = [permissions.AllowAny]
+
+
+class StudentQuestionViewSet(viewsets.ModelViewSet):
+    queryset = StudentQuestion.objects.all().order_by('-created_at')
+    serializer_class = StudentQuestionSerializer
+    permission_classes = [permissions.AllowAny]
+
+
+class StudentAnswerViewSet(viewsets.ModelViewSet):
+    queryset = StudentAnswer.objects.all()
+    serializer_class = StudentAnswerSerializer
+    permission_classes = [permissions.AllowAny]
+
+
+class ChatRoomViewSet(viewsets.ModelViewSet):
+    queryset = ChatRoom.objects.all()
+    serializer_class = ChatRoomSerializer
+    permission_classes = [permissions.AllowAny]
+    
+    def get_queryset(self):
+        queryset = super().get_queryset()
+        room_type = self.request.query_params.get('type')
+        tag = self.request.query_params.get('tag')
+        if room_type:
+            queryset = queryset.filter(room_type=room_type)
+        if tag:
+            queryset = queryset.filter(tag=tag)
+        return queryset
+
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def register_demo_user(request):
+    """
+    Быстрая регистрация для демо.
+    Принимает JSON: {
+        "nickname": "Syrgak",
+        "region": "Bishkek",
+        "avatar_id": "avatar_1.png",  # или индекс
+        "interests": ["games", "sport"]
+    }
+    """
+    data = request.data
+    nickname = data.get('nickname')
+
+    if not nickname:
+        return Response({'error': 'Никнейм обязателен'}, status=400)
+
+    # 1. Создаем пользователя (пароль ставим заглушку, он не нужен для демо)
+    if User.objects.filter(username=nickname).exists():
+        return Response({'error': 'Такой ник уже занят, выбери другой'}, status=400)
+    
+    user = User.objects.create_user(username=nickname, password='demo_password_123')
+
+    # 2. Создаем профиль
+    profile = Profile.objects.create(
+        user=user,
+        nickname=nickname,
+        region=data.get('region', 'Bishkek'),
+        # Фронт может присылать имя файла или ID, тут сохраняем как есть
+        # Если фронт шлет файл, логика другая, но для демо проще слать строку-идентификатор
+        interests=data.get('interests', [])
+    )
+    
+    # Если фронт шлет реальный файл аватара через multipart/form-data, 
+    # то profile.avatar = request.FILES['avatar']
+
+    return Response({
+        'status': 'created',
+        'user_id': user.id,
+        'profile_id': profile.id,
+        'nickname': profile.nickname
+    })
+
+class ChatMessageViewSet(viewsets.ModelViewSet):
+    queryset = ChatMessage.objects.all().order_by('created_at')
+    serializer_class = ChatMessageSerializer
+    permission_classes = [permissions.AllowAny]
+
+
+class EventViewSet(viewsets.ModelViewSet):
+    queryset = Event.objects.all()
+    serializer_class = EventSerializer
+    permission_classes = [permissions.AllowAny]
+

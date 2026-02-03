@@ -1,0 +1,31 @@
+# --- Python ---
+__pycache__/
+*.py[cod]
+*$py.class
+
+# --- Django ---
+*.log
+local_settings.py
+db.sqlite3
+db.sqlite3-journal
+
+# --- Виртуальное окружение (папка venv) ---
+venv/
+env/
+.env
+
+# --- Медиа и статика ---
+# media - это картинки, загруженные пользователями. Обычно их не комитят.
+# Но если нужны демо-картинки, можно закомментировать строку ниже.
+media/
+staticfiles/
+
+# --- IDE (настройки редактора) ---
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# --- OS (системные файлы) ---
+.DS_Store
+Thumbs.db
